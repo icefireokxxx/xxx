@@ -1,0 +1,81 @@
+type Database struct {
+      quitLock sync.Mutex      // Mutex protecting the quit channel access
+	    quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
+}
+
+func (db *Database) Close() error {
+	db.quitLock.Lock()
+	defer db.quitLock.Unlock()
+
+	if db.quitChan != nil {
+		errc := make(chan error)
+		db.quitChan <- errc
+		if err := <-errc; err != nil {
+			db.log.Error("Metrics collection failed", "err", err)
+		}
+		db.quitChan = nil
+	}
+	return db.db.Close()
+}
+
+
+func (db *Database) meter(refresh time.Duration) {
+
+	var (
+		errc chan error
+		merr error
+	)
+
+	timer := time.NewTimer(refresh)
+	defer timer.Stop()
+
+	// Iterate ad infinitum and collect the stats
+	for i := 1; errc == nil && merr == nil; i++ {
+      ...
+      if n, err := fmt.Sscanf(parts[0], "Read(MB):%f", &nRead); n != 1 || err != nil {
+            db.log.Error("Bad syntax of read entry", "entry", parts[0])
+            merr = err
+            continue
+		}
+   
+  
+    // Sleep a bit, then repeat the stats collection
+      select {
+      case errc = <-db.quitChan:
+        // Quit requesting, stop hammering the database
+      case <-timer.C:
+        timer.Reset(refresh)
+        // Timeout, gather a new set of stats
+      }
+  }
+  
+  if errc == nil {
+		errc = <-db.quitChan
+	}
+	errc <- merr
+  
+  
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
