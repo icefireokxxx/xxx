@@ -1,0 +1,255 @@
+go的常规代码格式
+
+1. waitGroup格式
+   wait := sync.WaitGroup{}
+   wait.Add(1)
+   ...
+   waitChan := xx返回通道
+
+   go func(参数) {
+      packet := <-waitChan
+      ...
+      wait.Done()
+   }(参数)
+
+   wait.Wait()
+
+2. 通道，协程和定时配合
+   popChan := make(chan proto.Message)
+   
+   go func() {
+	popChan <- queue.Pop()
+   }()
+
+   time.Sleep(50 * time.Millisecond)
+
+    select {
+	case p := <-popChan:
+	    So(p, ShouldPointTo, testPacket)
+
+	case <-time.After(time.Millisecond * 100):
+	     t.FailNow()
+     }
+
+3. 协程不退出写法
+   go sender.run() 开协程
+
+
+   func (s *packetSender) run() {
+	for {
+		p := s.queue.Pop()
+		if p == nil {
+		   break
+		}
+
+		safe.Run(func() {
+			err := s.send(p)
+			if err != nil {
+				logger.Notice(err.Error())
+				s.session.ClosedByClient()
+				return
+			}
+		})
+
+		
+	}
+   }
+
+4。 if语句简洁写法
+    if e := r.readBuffer(2, buffer[0:2]); e != nil {}
+
+5. 控制定时器不退出或退出
+   	var timeout *time.Timer
+	if r.session.useTimeout {
+		timeout = time.AfterFunc(PACKET_TIME_OUT, func() {
+			if r.session.IsClosed() {
+				return
+			}
+
+			logger.Notice("session[%d] is closed due to timeout", r.session.id)
+			queue.Close()
+		})
+		defer timeout.Stop()
+	}
+ 
+     for {
+	packet := queue.Pop()	
+
+	if timeout != nil {
+			timeout.Reset(PACKET_TIME_OUT)
+		}
+     }
+
+     //判断包的类型
+     switch packet.(type) {
+	case *MSG_IAM_ALIVE_PACKET:
+		r.session.aliveTime += IAM_ALIVE_TIME
+
+	case *MSG_SYSTEM_PING: // server to server
+		pong := &MSG_SYSTEM_PONG{}
+		r.session.Send(pong)
+
+	default:
+		safe.Run(func() {
+			_ = r.session.packetHandler.Call(packet)
+		})
+	}
+
+
+
+OpenGate-->Open(1个accept协程，1个连接1个协程)
+1个连接1个协程->这个协程中产生1个session(多个session公用packetStream)
+--session产生1个sender(1个协程和1个发送队列)
+--session产生1个receiver产生1个网络层接收协程(这个协程会优先处理RPC包）
+                        产生另外1个包处理协程(这个协程专门处理其他非RPC包）
+
+6. 通道编程模式
+  1. make通道 closed = make(chan struct{})和定时器通道c5<-chan time.Time
+  2. 创建协程 go run(closed)
+  3. run函数加入异常恢复
+     for{
+	select {
+	    case <-ch:  //处理通道
+		return 
+	    case 
+	
+     }
+
+7. 系统信号量等待
+	killSignalChan := make(chan os.Signal)
+	signal.Notify(killSignalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// wait kill signals
+	<-killSignalChan
+
+8 string和[]byte互相转换
+  []byte xx=string(value.([]byte))
+  string xx=[]byte(value.(string))
+
+
+9 定时器用法
+(1)暂停几秒
+   (A)timer := time.NewTimer(3 * time.Second)
+      <-timer.C
+      timer.Stop()
+
+   (B)<-time.After(time.Second * 10) 实现超时控制
+      使用场合
+      go func() {
+	for {
+		<-time.After(time.Second * (EXPIRE_SEC / 3)) //实现超时控制
+		safe.Run(func() {
+			self.infoLock.RLock()
+			defer self.infoLock.RUnlock()
+			_ = self.postponeExpire()
+		})
+	}
+	}()
+
+ (2)周期性触发  
+    (A)
+    	ticker1 := time.NewTicker(2 * time.Second)
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case t := <-ticker1.C:
+				fmt.Println("Tick at ticker1", t)
+			}
+		}
+	}()
+	time.Sleep(20 * time.Second)
+	ticker1.Stop()   // 取消定时器
+	done <- true
+    (B)
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(time.Second * 5): //实现超时控制
+				fmt.Println("Tick at time.After")
+			}
+		}
+	}()
+	time.Sleep(20 * time.Second)
+	done <- true
+
+  (C)
+ for range time.Tick(d) {}
+
+
+(3)应用场景 
+  (A) 应用场景，我们可以使用 time.After() 实现超时控制，比如我们调用一个服务的 api，要求超时时间是 1s，可以结合 select 实现。
+	  func main() {
+	    // fmt.Println("公众号：Golang来啦")
+
+	    ch := make(chan string, 1)
+	    go func() {
+		// 假设我们在这里执行一个外部调用，2秒之后将结果写入 ch
+		time.Sleep(time.Second * 2)
+		ch <- "success"
+	    }()
+
+	    select {
+	    case res := <-ch:
+		fmt.Println(res)
+	    case <-time.After(time.Second * 1):
+		fmt.Println("timeout 1")
+	    }
+	}
+(B)time.AfterFunc() 用于延时执行自定义函数，会另起一个协程并等待指定时间过去，然后调用函数 f。它返回一个 Timer，可以通过调用其 Stop() 方法来取消等待和对 f 的
+	func main() {
+	    // fmt.Println("公众号：Golang来啦")
+
+	    ch := make(chan int, 1)
+
+	    time.AfterFunc(10*time.Second, func() {
+		fmt.Println("10 seconds over....")
+		ch <- 8
+	    })
+
+	    for {
+		select {
+		case n := <-ch:
+		    fmt.Println(n, "is arriving")
+		    fmt.Println("Done!")
+		    return
+		default:
+		    time.Sleep(3 * time.Second)
+		    fmt.Println("time to wait")
+		}
+	    }
+	}
+
+(C)调用 Stop() 函数取消函数执行：
+func main() {
+    // fmt.Println("公众号：Golang来啦")
+
+    timer1 :=time.AfterFunc(3*time.Second, func() {
+        fmt.Println("10 seconds over....")
+    })
+    time.Sleep(1*time.Second)
+
+    timer1.Stop()
+    fmt.Println("已取消等待和函数执行")
+    time.Sleep(5*time.Second)
+    fmt.Println("ok")
+}
+
+(D)死循环
+func main() {
+    t := time.AfterFunc(8*time.Second, func() {
+        fmt.Println("Golang来啦")
+    })
+    for {
+        select {
+        case <-t.C:
+            fmt.Println("seekload")
+            break
+        }
+    }
+}
