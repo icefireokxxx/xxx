@@ -178,8 +178,14 @@ OpenGate-->Open(1个accept协程，1个连接1个协程)
 	time.Sleep(20 * time.Second)
 	done <- true
 
-  (C)
- for range time.Tick(d) {}
+    (C)周期性触发定时器
+	 for range time.Tick(d) {}
+	 
+    (D)周期性触发定时器
+       ticker := time.NewTicker(rep.Interval)
+	defer ticker.Stop()
+	for now := range ticker.C {
+	}
 
 
 (3)应用场景 
