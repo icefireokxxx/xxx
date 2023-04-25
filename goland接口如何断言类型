@@ -1,0 +1,11 @@
+(1)值类型
+func (r *StandardRegistry) register(name string, i interface{}) error {
+	...
+	switch i.(type) {
+	case Counter, CounterFloat64, Gauge, GaugeFloat64, Healthcheck, Histogram, Meter, Timer, ResettingTimer:
+		r.metrics[name] = i
+	}
+	return nil
+}
+
+(2)指针类型
